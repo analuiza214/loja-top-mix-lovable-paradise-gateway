@@ -294,7 +294,7 @@ export default function Success() {
         );
         const json = await res.json() as { isPaid?: boolean; isExpired?: boolean };
 
-        if (json.isPaid && !trackingFired.current) {
+        if ((json.isPaid || json.status === "paid") && !trackingFired.current) {
           trackingFired.current = true;
           if (pollInterval.current) clearInterval(pollInterval.current);
           fireTrackingEvents(orderAmount, orderProductName);
