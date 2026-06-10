@@ -109,8 +109,8 @@ exports.handler = async (event) => {
     const data = result.body;
 
     // Verificando os campos reais retornados pela ParadisePags
-    const pixCode = data.pix_code || data.copy_paste || data.code || (data.data && (data.data.pix_code || data.data.qrcode));
-    const qrCodeBase64 = data.pix_qr_code || data.qrcode_base64 || (data.data && data.data.qrcode_base64);
+    const pixCode = data.pix_code || data.copy_paste || data.code || (data.data && (data.data.pix_code || data.data.qrcode || data.data.code_pix));
+    const qrCodeBase64 = data.pix_qr_code || data.qrcode_base64 || (data.data && (data.data.qrcode_base64 || data.data.pix_qr_code));
 
     if (!pixCode) {
       return {

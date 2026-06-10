@@ -98,13 +98,15 @@ async function createPix(checkoutData: object): Promise<PixData> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(checkoutData),
   });
-  const data = await res.json() as {
-    transactionId?: string;
-    pixCode?: string;
-    qrCodeBase64?: string;
-    qrCodeImage?: string;
-    error?: string;
-  };
+
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    throw new Error("Erro na comunicação com o servidor. A função create-pix.js não foi encontrada ou retornou um erro.");
+  }
+
   if (!res.ok || !data.pixCode) throw new Error(data.error || "Erro ao gerar PIX.");
   return {
     transactionId: data.transactionId || "",
