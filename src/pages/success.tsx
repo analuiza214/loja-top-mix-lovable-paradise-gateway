@@ -650,7 +650,7 @@ export default function Success() {
                     <div className="border-2 border-green-100 rounded-2xl p-3 bg-white shadow-sm inline-block">
                       <img src={qrSrc} alt="QR Code PIX" className="w-52 h-52 object-contain" />
                     </div>
-                    <p className="text-[11px] text-gray-400 mt-2.5 font-normal">Escaneie com a Câmera do banco ou copie o código pronto.</p>
+                    <p className="text-[11px] text-gray-400 mt-2.5 font-normal">Escaneie com a Câmera do banco.</p>
                   </div>
                 )}
 
