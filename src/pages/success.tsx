@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { X, AlertCircle, RefreshCw, CreditCard, Copy, CheckCheck } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { getStoredUtms } from "@/lib/tracking";
-import QRCode from "qrcode";
+import * as QRCode from "qrcode";
 
 
 type Phase = "loading" | "reveal" | "content";
