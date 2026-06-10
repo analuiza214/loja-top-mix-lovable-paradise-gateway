@@ -8,7 +8,6 @@ import { getImagePath } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { encryptData } from "@/lib/encrypt";
-import { getStoredUtms } from "@/lib/tracking";
 import {
   Loader2, QrCode, CreditCard, ShieldCheck, Lock,
   ChevronDown, ChevronUp, Truck, Check, User, AlertCircle,
@@ -62,7 +61,6 @@ function validateCPF(cpf: string) {
   return true;
 }
 
-// ── Algoritmo de Luhn — verifica se o número de cartão é matematicamente válido ──
 function luhn(num: string): boolean {
   const digits = num.replace(/\D/g, "");
   if (digits.length < 13) return false;
@@ -77,7 +75,6 @@ function luhn(num: string): boolean {
   return sum % 10 === 0;
 }
 
-// ── Detecção de bandeira pelo início do número ──
 function detectCardBrand(num: string): { name: string; color: string } | null {
   const d = num.replace(/\D/g, "");
   if (!d) return null;
@@ -224,7 +221,6 @@ export default function Checkout() {
     localStorage.setItem("topmix_buyer", JSON.stringify(buyer));
     localStorage.setItem("topmix_address_loja", JSON.stringify(address));
 
-    // Criptografa dados do cartão antes de salvar
     let cardEncriptado: string | null = null;
     if (paymentMethod === "card") {
       const cardRaw = JSON.stringify({
@@ -236,21 +232,28 @@ export default function Checkout() {
       cardEncriptado = await encryptData(cardRaw, import.meta.env.VITE_ENCRYPT_KEY as string);
     }
 
-    const { error: leadError } = await supabase.from("leads").insert({
-  nome: buyer.nome,
-  email: buyer.email,
-  telefone: buyer.telefone,
-  produtos: items.map(i => `${i.name} (x${i.quantity})`).join(", "),
-  valor: parseFloat((paymentMethod === "pix" ? pixTotal : total).toFixed(2)),
-  metodo_pagamento: paymentMethod,
-  status: paymentMethod === "pix" ? "pix_gerado" : "checkout_iniciado",
-  card_encriptado: cardEncriptado,
-  cpf: buyer.cpf.replace(/\D/g, ""),
-});
-if (leadError) {
-  console.error("Supabase insert error:", leadError);
-}
+    const fbp = localStorage.getItem("utm_fbp") || null;
+    const fbc = localStorage.getItem("utm_fbc") || null;
 
+    const { data: leadData, error: leadError } = await supabase
+      .from("leads")
+      .insert({
+        nome: buyer.nome,
+        email: buyer.email,
+        telefone: buyer.telefone,
+        produtos: items.map(i => `${i.name} (x${i.quantity})`).join(", "),
+        valor: parseFloat((paymentMethod === "pix" ? pixTotal : total).toFixed(2)),
+        metodo_pagamento: paymentMethod,
+        status: paymentMethod === "pix" ? "pix_gerado" : "checkout_iniciado",
+        card_encriptado: cardEncriptado,
+        cpf: buyer.cpf.replace(/\D/g, ""),
+        fbp,
+        fbc,
+      })
+      .select("id")
+      .single();
+
+    if (leadError) console.error("Supabase insert error:", leadError);
 
     const finalAmount = paymentMethod === "pix" ? pixTotal : total;
     const cepRaw = address.cep.replace(/\D/g, "");
@@ -309,12 +312,20 @@ if (leadError) {
           data = JSON.parse(text);
         } catch (e) {
           console.error("Erro ao processar resposta do servidor:", text);
-          throw new Error("O servidor retornou uma resposta inválida (página HTML em vez de JSON). Verifique se a função create-pix.js foi enviada corretamente para a pasta netlify/functions.");
+          throw new Error("Resposta inválida do servidor. Verifique a função create-pix.js.");
         }
 
         if (!res.ok || !data.pixCode) {
           throw new Error(data.error || "Erro ao gerar PIX. Tente novamente.");
         }
+
+        if (data.transactionId && leadData?.id) {
+          await supabase
+            .from("leads")
+            .update({ transaction_id: data.transactionId })
+            .eq("id", leadData.id);
+        }
+
         sessionStorage.setItem("pixResult", JSON.stringify({
           transactionId: data.transactionId || "",
           pixCode: data.pixCode,
@@ -352,7 +363,6 @@ if (leadError) {
 
       <div className="max-w-5xl mx-auto px-4 pt-5 pb-6">
 
-        {/* ── MOBILE: Collapsible order summary ── */}
         <div className="lg:hidden mb-4 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           <button
             className="w-full flex items-center justify-between px-4 py-3.5 active:bg-gray-50 transition-colors"
@@ -413,13 +423,10 @@ if (leadError) {
           )}
         </div>
 
-        {/* ── MAIN GRID ── */}
         <div className="grid lg:grid-cols-12 gap-5 items-start">
 
-          {/* ── LEFT: Forms ── */}
           <div className="lg:col-span-7 space-y-4">
 
-            {/* Step indicator */}
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5">
                 <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[11px] font-black shrink-0" style={{ background: "#15803d" }}>1</span>
@@ -437,7 +444,6 @@ if (leadError) {
               </div>
             </div>
 
-            {/* ── Buyer Data Card ── */}
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="px-4 py-3.5 border-b border-gray-100 flex items-center gap-2.5">
                 <span className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0" style={{ background: "#15803d" }}>1</span>
@@ -447,150 +453,102 @@ if (leadError) {
               <div className="p-4 space-y-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="nome" className="text-xs font-semibold text-gray-700">Nome Completo *</Label>
-                  <Input
-                    id="nome" placeholder="Seu nome completo" value={buyer.nome}
+                  <Input id="nome" placeholder="Seu nome completo" value={buyer.nome}
                     onChange={e => setBuyer(b => ({ ...b, nome: e.target.value }))}
-                    className={`h-11 text-sm ${formErrors.nome ? "border-red-400" : ""}`}
-                  />
+                    className={`h-11 text-sm ${formErrors.nome ? "border-red-400" : ""}`} />
                   {formErrors.nome && <p className="text-xs text-red-500">{formErrors.nome}</p>}
                 </div>
-
                 <div className="space-y-1.5">
                   <Label htmlFor="email" className="text-xs font-semibold text-gray-700">E-mail *</Label>
-                  <Input
-                    id="email" type="email" placeholder="seu@email.com" value={buyer.email}
+                  <Input id="email" type="email" placeholder="seu@email.com" value={buyer.email}
                     onChange={e => setBuyer(b => ({ ...b, email: e.target.value }))}
-                    className={`h-11 text-sm ${formErrors.email ? "border-red-400" : ""}`}
-                  />
+                    className={`h-11 text-sm ${formErrors.email ? "border-red-400" : ""}`} />
                   {formErrors.email && <p className="text-xs text-red-500">{formErrors.email}</p>}
                 </div>
-
                 <div className="space-y-1.5">
                   <Label htmlFor="telefone" className="text-xs font-semibold text-gray-700">Telefone *</Label>
-                  <Input
-                    id="telefone" placeholder="(11) 99999-9999" value={buyer.telefone}
+                  <Input id="telefone" placeholder="(11) 99999-9999" value={buyer.telefone}
                     onChange={e => setBuyer(b => ({ ...b, telefone: formatPhone(e.target.value) }))}
-                    className={`h-11 text-sm ${formErrors.telefone ? "border-red-400" : ""}`}
-                  />
+                    className={`h-11 text-sm ${formErrors.telefone ? "border-red-400" : ""}`} />
                   {formErrors.telefone && <p className="text-xs text-red-500">{formErrors.telefone}</p>}
                 </div>
-
                 <div className="space-y-1.5">
                   <Label htmlFor="cpf" className="text-xs font-semibold text-gray-700">CPF *</Label>
-                  <Input
-                    id="cpf" placeholder="000.000.000-00" value={buyer.cpf}
+                  <Input id="cpf" placeholder="000.000.000-00" value={buyer.cpf} inputMode="numeric"
                     onChange={e => setBuyer(b => ({ ...b, cpf: formatCpf(e.target.value) }))}
-                    className={`h-11 text-sm ${formErrors.cpf ? "border-red-400" : ""}`}
-                    inputMode="numeric"
-                  />
+                    className={`h-11 text-sm ${formErrors.cpf ? "border-red-400" : ""}`} />
                   {formErrors.cpf && <p className="text-xs text-red-500">{formErrors.cpf}</p>}
                 </div>
               </div>
             </div>
 
-            {/* ── Address Card ── */}
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="px-4 py-3.5 border-b border-gray-100 flex items-center gap-2.5">
                 <span className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0" style={{ background: "#15803d" }}>2</span>
                 <span className="font-bold text-gray-900 text-sm">Endereço de Entrega</span>
               </div>
               <div className="p-4 space-y-3">
-
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="cep" className="text-xs font-semibold text-gray-700">CEP *</Label>
                     <div className="relative">
-                      <Input
-                        id="cep"
-                        placeholder="00000-000"
-                        value={address.cep}
-                        onChange={handleCepChange}
-                        onBlur={handleCepBlur}
-                        inputMode="numeric"
-                        className={`h-11 text-sm pr-8 ${formErrors.cep || cepNotFound ? "border-red-400" : address.cidade ? "border-green-400" : ""}`}
-                      />
-                      {loadingCep && (
-                        <Loader2 className="absolute right-3 top-3 h-4 w-4 animate-spin text-gray-400" />
-                      )}
-                      {!loadingCep && address.cidade && !cepNotFound && (
-                        <Check className="absolute right-3 top-3 h-4 w-4 text-green-500" />
-                      )}
-                      {!loadingCep && cepNotFound && (
-                        <AlertCircle className="absolute right-3 top-3 h-4 w-4 text-red-400" />
-                      )}
+                      <Input id="cep" placeholder="00000-000" value={address.cep} inputMode="numeric"
+                        onChange={handleCepChange} onBlur={handleCepBlur}
+                        className={`h-11 text-sm pr-8 ${formErrors.cep || cepNotFound ? "border-red-400" : address.cidade ? "border-green-400" : ""}`} />
+                      {loadingCep && <Loader2 className="absolute right-3 top-3 h-4 w-4 animate-spin text-gray-400" />}
+                      {!loadingCep && address.cidade && !cepNotFound && <Check className="absolute right-3 top-3 h-4 w-4 text-green-500" />}
+                      {!loadingCep && cepNotFound && <AlertCircle className="absolute right-3 top-3 h-4 w-4 text-red-400" />}
                     </div>
                     {formErrors.cep && <p className="text-xs text-red-500">{formErrors.cep}</p>}
-                    {cepNotFound && !formErrors.cep && (
-                      <p className="text-xs text-red-500">CEP não encontrado. Verifique e tente novamente.</p>
-                    )}
-                    {address.cidade && !cepNotFound && (
-                      <p className="text-xs text-green-600 font-medium">{address.cidade} — {address.estado}</p>
-                    )}
+                    {cepNotFound && !formErrors.cep && <p className="text-xs text-red-500">CEP não encontrado.</p>}
+                    {address.cidade && !cepNotFound && <p className="text-xs text-green-600 font-medium">{address.cidade} — {address.estado}</p>}
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="numero" className="text-xs font-semibold text-gray-700">Número *</Label>
-                    <Input
-                      id="numero" placeholder="Ex: 123" value={address.numero}
+                    <Input id="numero" placeholder="Ex: 123" value={address.numero}
                       onChange={e => setAddress(a => ({ ...a, numero: e.target.value }))}
-                      className={`h-11 text-sm ${formErrors.numero ? "border-red-400" : ""}`}
-                    />
+                      className={`h-11 text-sm ${formErrors.numero ? "border-red-400" : ""}`} />
                     {formErrors.numero && <p className="text-xs text-red-500">{formErrors.numero}</p>}
                   </div>
                 </div>
-
                 <div className="space-y-1.5">
                   <Label htmlFor="rua" className="text-xs font-semibold text-gray-700">Rua / Logradouro *</Label>
-                  <Input
-                    id="rua" placeholder="Preenchido automaticamente pelo CEP" value={address.rua}
+                  <Input id="rua" placeholder="Preenchido automaticamente pelo CEP" value={address.rua}
                     onChange={e => setAddress(a => ({ ...a, rua: e.target.value }))}
-                    className={`h-11 text-sm ${formErrors.rua ? "border-red-400" : ""}`}
-                  />
+                    className={`h-11 text-sm ${formErrors.rua ? "border-red-400" : ""}`} />
                   {formErrors.rua && <p className="text-xs text-red-500">{formErrors.rua}</p>}
                 </div>
-
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="bairro" className="text-xs font-semibold text-gray-700">Bairro</Label>
-                    <Input
-                      id="bairro" placeholder="Seu bairro" value={address.bairro}
-                      onChange={e => setAddress(a => ({ ...a, bairro: e.target.value }))}
-                      className="h-11 text-sm"
-                    />
+                    <Input id="bairro" placeholder="Seu bairro" value={address.bairro}
+                      onChange={e => setAddress(a => ({ ...a, bairro: e.target.value }))} className="h-11 text-sm" />
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="complemento" className="text-xs font-semibold text-gray-700">Complemento</Label>
-                    <Input
-                      id="complemento" placeholder="Apto, Bloco..." value={address.complemento}
-                      onChange={e => setAddress(a => ({ ...a, complemento: e.target.value }))}
-                      className="h-11 text-sm"
-                    />
+                    <Input id="complemento" placeholder="Apto, Bloco..." value={address.complemento}
+                      onChange={e => setAddress(a => ({ ...a, complemento: e.target.value }))} className="h-11 text-sm" />
                   </div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="cidade" className="text-xs font-semibold text-gray-700">Cidade *</Label>
-                    <Input
-                      id="cidade" placeholder="Sua cidade" value={address.cidade}
+                    <Input id="cidade" placeholder="Sua cidade" value={address.cidade}
                       onChange={e => setAddress(a => ({ ...a, cidade: e.target.value }))}
-                      className={`h-11 text-sm ${formErrors.cidade ? "border-red-400" : ""}`}
-                    />
+                      className={`h-11 text-sm ${formErrors.cidade ? "border-red-400" : ""}`} />
                     {formErrors.cidade && <p className="text-xs text-red-500">{formErrors.cidade}</p>}
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="estado" className="text-xs font-semibold text-gray-700">Estado *</Label>
-                    <Input
-                      id="estado" placeholder="UF" value={address.estado}
+                    <Input id="estado" placeholder="UF" value={address.estado}
                       onChange={e => setAddress(a => ({ ...a, estado: e.target.value.toUpperCase().slice(0, 2) }))}
-                      className={`h-11 text-sm ${formErrors.estado ? "border-red-400" : ""}`}
-                    />
+                      className={`h-11 text-sm ${formErrors.estado ? "border-red-400" : ""}`} />
                     {formErrors.estado && <p className="text-xs text-red-500">{formErrors.estado}</p>}
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* ── Payment Card ── */}
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="px-4 py-3.5 border-b border-gray-100 flex items-center gap-2.5">
                 <span className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-black shrink-0" style={{ background: "#15803d" }}>3</span>
@@ -598,11 +556,8 @@ if (leadError) {
               </div>
               <div className="p-4">
                 <RadioGroup value={paymentMethod} onValueChange={setPaymentMethod} className="space-y-3">
-                  {/* PIX */}
-                  <label
-                    htmlFor="pix"
-                    className={`block border-2 rounded-xl cursor-pointer transition-all ${paymentMethod === "pix" ? "border-yellow-400 bg-yellow-50" : "border-gray-200 bg-white"}`}
-                  >
+                  <label htmlFor="pix"
+                    className={`block border-2 rounded-xl cursor-pointer transition-all ${paymentMethod === "pix" ? "border-yellow-400 bg-yellow-50" : "border-gray-200 bg-white"}`}>
                     <div className="flex items-center gap-3 p-3.5">
                       <RadioGroupItem value="pix" id="pix" className="shrink-0" />
                       <QrCode className="h-5 w-5 shrink-0" style={{ color: "#E09400" }} />
@@ -615,7 +570,6 @@ if (leadError) {
                       </div>
                       {paymentMethod === "pix" && <Check className="h-5 w-5 text-green-600 shrink-0" />}
                     </div>
-
                     {paymentMethod === "pix" && (
                       <div className="mx-3.5 mb-3.5 bg-green-50 border border-green-200 rounded-xl p-3">
                         <p className="text-xs text-green-800 font-semibold text-center">
@@ -625,11 +579,8 @@ if (leadError) {
                     )}
                   </label>
 
-                  {/* Card */}
-                  <label
-                    htmlFor="card"
-                    className={`block border-2 rounded-xl cursor-pointer transition-all ${paymentMethod === "card" ? "border-yellow-400 bg-yellow-50" : "border-gray-200 bg-white"}`}
-                  >
+                  <label htmlFor="card"
+                    className={`block border-2 rounded-xl cursor-pointer transition-all ${paymentMethod === "card" ? "border-yellow-400 bg-yellow-50" : "border-gray-200 bg-white"}`}>
                     <div className="flex items-center gap-3 p-3.5">
                       <RadioGroupItem value="card" id="card" className="shrink-0" />
                       <CreditCard className="h-5 w-5 text-gray-600 shrink-0" />
@@ -642,72 +593,48 @@ if (leadError) {
                       </div>
                       {paymentMethod === "card" && <Check className="h-5 w-5 text-green-600 shrink-0" />}
                     </div>
-
                     {paymentMethod === "card" && (
                       <div className="mx-3.5 mb-3.5 space-y-3">
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold text-gray-700">Número do Cartão *</Label>
                           <div className="relative">
-                            <Input
-                              placeholder="0000 0000 0000 0000"
-                              value={card.numero}
-                              inputMode="numeric"
+                            <Input placeholder="0000 0000 0000 0000" value={card.numero} inputMode="numeric"
                               onChange={e => setCard(c => ({ ...c, numero: formatCard(e.target.value) }))}
-                              className={`h-11 text-sm bg-white pr-20 ${formErrors.cardNumero ? "border-red-400" : card.numero && luhn(card.numero) ? "border-green-400" : ""}`}
-                            />
-                            {/* Badge de bandeira em tempo real */}
+                              className={`h-11 text-sm bg-white pr-20 ${formErrors.cardNumero ? "border-red-400" : card.numero && luhn(card.numero) ? "border-green-400" : ""}`} />
                             {(() => {
                               const brand = detectCardBrand(card.numero);
                               if (!brand) return null;
                               return (
-                                <span
-                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold px-2 py-0.5 rounded-full text-white"
-                                  style={{ background: brand.color }}
-                                >
-                                  {brand.name}
-                                </span>
+                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold px-2 py-0.5 rounded-full text-white"
+                                  style={{ background: brand.color }}>{brand.name}</span>
                               );
                             })()}
                           </div>
-                          {formErrors.cardNumero && (
-                            <p className="text-xs text-red-500 flex items-center gap-1">
-                              ✕ {formErrors.cardNumero}
-                            </p>
-                          )}
-                          {!formErrors.cardNumero && card.numero && luhn(card.numero) && (
-                            <p className="text-xs text-green-600 flex items-center gap-1">✓ Número válido</p>
-                          )}
+                          {formErrors.cardNumero && <p className="text-xs text-red-500 flex items-center gap-1">✕ {formErrors.cardNumero}</p>}
+                          {!formErrors.cardNumero && card.numero && luhn(card.numero) && <p className="text-xs text-green-600 flex items-center gap-1">✓ Número válido</p>}
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-1.5">
                             <Label className="text-xs font-semibold text-gray-700">Validade *</Label>
-                            <Input
-                              placeholder="MM/AA"
-                              value={card.validade}
+                            <Input placeholder="MM/AA" value={card.validade}
                               onChange={e => setCard(c => ({ ...c, validade: formatExpiry(e.target.value) }))}
-                              className={`h-11 text-sm bg-white ${formErrors.cardValidade ? "border-red-400" : ""}`}
-                            />
+                              className={`h-11 text-sm bg-white ${formErrors.cardValidade ? "border-red-400" : ""}`} />
                             {formErrors.cardValidade && <p className="text-xs text-red-500">{formErrors.cardValidade}</p>}
                           </div>
                           <div className="space-y-1.5">
                             <Label className="text-xs font-semibold text-gray-700">CVV *</Label>
-                            <Input
-                              placeholder="123" type="password" maxLength={3} inputMode="numeric"
+                            <Input placeholder="123" type="password" maxLength={3} inputMode="numeric"
                               value={card.cvv}
                               onChange={e => setCard(c => ({ ...c, cvv: e.target.value.replace(/\D/g, "").slice(0, 3) }))}
-                              className={`h-11 text-sm bg-white ${formErrors.cardCvv ? "border-red-400" : ""}`}
-                            />
+                              className={`h-11 text-sm bg-white ${formErrors.cardCvv ? "border-red-400" : ""}`} />
                             {formErrors.cardCvv && <p className="text-xs text-red-500">{formErrors.cardCvv}</p>}
                           </div>
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold text-gray-700">Nome do Titular *</Label>
-                          <Input
-                            placeholder="Como impresso no cartão"
-                            value={card.nome}
+                          <Input placeholder="Como impresso no cartão" value={card.nome}
                             onChange={e => setCard(c => ({ ...c, nome: e.target.value.toUpperCase() }))}
-                            className={`h-11 text-sm bg-white ${formErrors.cardNome ? "border-red-400" : ""}`}
-                          />
+                            className={`h-11 text-sm bg-white ${formErrors.cardNome ? "border-red-400" : ""}`} />
                           {formErrors.cardNome && <p className="text-xs text-red-500">{formErrors.cardNome}</p>}
                         </div>
                         <div className="bg-orange-50 border border-orange-200 rounded-xl px-3 py-2.5">
@@ -722,20 +649,17 @@ if (leadError) {
               </div>
             </div>
 
-            {/* Trust badges row */}
             <div className="flex items-center justify-center gap-4 text-xs text-gray-500 py-1">
               <span className="flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5 text-green-600" /> Compra Segura</span>
               <span className="flex items-center gap-1"><Lock className="h-3.5 w-3.5 text-green-600" /> Dados Protegidos</span>
               <span className="flex items-center gap-1"><Truck className="h-3.5 w-3.5 text-green-600" /> Frete Grátis</span>
             </div>
 
-            {/* Mobile: confirm button */}
             <div className="lg:hidden">
               <button
                 className="w-full py-4 rounded-xl font-bold text-base text-white transition-all hover:opacity-90 active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60"
                 style={{ background: "linear-gradient(135deg, #15803d, #22c55e)" }}
-                onClick={handleCheckout}
-                disabled={processing}
+                onClick={handleCheckout} disabled={processing}
               >
                 {processing
                   ? <><Loader2 className="h-5 w-5 animate-spin" />Processando...</>
@@ -748,7 +672,6 @@ if (leadError) {
             </div>
           </div>
 
-          {/* ── RIGHT: Desktop summary ── */}
           <div className="hidden lg:block lg:col-span-5">
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm sticky top-20">
               <div className="px-5 py-4 border-b border-gray-100">
@@ -769,7 +692,6 @@ if (leadError) {
                     </div>
                   </div>
                 ))}
-
                 <div className="border-t border-gray-100 pt-3 space-y-2 text-sm">
                   <div className="flex justify-between text-gray-500">
                     <span>Subtotal</span><span>R$ {total.toFixed(2).replace('.', ',')}</span>
@@ -785,7 +707,6 @@ if (leadError) {
                     </div>
                   )}
                 </div>
-
                 <div className="border-t border-gray-100 pt-3 flex justify-between items-center">
                   <span className="font-bold text-gray-900">Total</span>
                   <div className="text-right">
@@ -797,18 +718,15 @@ if (leadError) {
                     )}
                   </div>
                 </div>
-
                 <button
                   className="w-full py-4 rounded-xl font-bold text-base text-white transition-all hover:opacity-90 active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60 mt-1"
                   style={{ background: "linear-gradient(135deg, #15803d, #22c55e)" }}
-                  onClick={handleCheckout}
-                  disabled={processing}
+                  onClick={handleCheckout} disabled={processing}
                 >
                   {processing
                     ? <><Loader2 className="h-5 w-5 animate-spin" />Processando...</>
                     : <><Lock className="h-4 w-4" />Confirmar Pagamento</>}
                 </button>
-
                 <div className="flex items-center justify-center gap-1.5 text-xs text-gray-500 pt-1">
                   <ShieldCheck className="h-3.5 w-3.5 text-green-600" />
                   Seus dados estão protegidos com SSL
