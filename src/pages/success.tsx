@@ -279,7 +279,7 @@ export default function Success() {
 
       try {
         const res = await fetch(
-          `/api/pix/status?transactionId=${encodeURIComponent(pixData.transactionId)}`
+          `/.netlify/functions/create-pix?hash=${encodeURIComponent(pixData.transactionId)}`
         );
         const json = await res.json() as { isPaid?: boolean; isExpired?: boolean };
 
