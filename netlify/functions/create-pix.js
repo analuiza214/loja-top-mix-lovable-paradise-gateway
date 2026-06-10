@@ -86,7 +86,7 @@ exports.handler = async (event) => {
     const apiUrl = "https://multi.paradisepags.com/api/v1/transaction.php";
     
     const result = await httpsRequest("POST", apiUrl, payload, {
-      "Authorization": `Bearer ${apiKey}`
+      "X-API-KEY": apiKey
     });
 
     console.log("ParadisePags Request Payload:", JSON.stringify(payload));
