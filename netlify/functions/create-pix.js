@@ -1,4 +1,5 @@
 const https = require("https");
+const QRCode = require("qrcode");
 
 function httpsRequest(method, url, data, headers) {
   return new Promise((resolve, reject) => {
@@ -126,7 +127,7 @@ exports.handler = async (event) => {
 
     const data = result.body;
     
-    // Busca exaustiva pelo código PIX
+    // Busca exaustiva pelo código PIX e QR Code
     const findPix = (obj) => {
       if (!obj) return null;
       for (let key in obj) {
@@ -139,8 +140,34 @@ exports.handler = async (event) => {
       return null;
     };
 
+    const findQrCode = (obj) => {
+      if (!obj) return null;
+      for (let key in obj) {
+        const val = obj[key];
+        if (typeof val === 'string') {
+          if (val.startsWith('data:image') || (val.length > 500 && !val.includes(' '))) return val;
+          if (key.toLowerCase().includes('qrcode') && (val.startsWith('http') || val.length > 100)) return val;
+        }
+        if (typeof val === 'object') {
+          const found = findQrCode(val);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
     const pixCode = findPix(data);
     const externalId = data.hash || data.transaction_id || (data.data && (data.data.hash || data.data.id));
+
+    // Gerar QR Code oficial a partir do pixCode se a API não retornou um válido
+    let finalQrCodeBase64 = data.qrcode_base64 || (data.data && data.data.qrcode_base64);
+    if (!finalQrCodeBase64 && pixCode) {
+      try {
+        finalQrCodeBase64 = await QRCode.toDataURL(pixCode);
+      } catch (qrErr) {
+        console.error("Erro ao gerar QR Code:", qrErr);
+      }
+    }
 
     return {
       statusCode: 200,
@@ -148,7 +175,7 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         transactionId: externalId,
         pixCode: pixCode,
-        qrCodeBase64: data.qrcode_base64 || (data.data && data.data.qrcode_base64),
+        qrCodeBase64: finalQrCodeBase64,
         qrCodeImage: data.qrcode_url || (data.data && data.data.qrcode_url)
       }),
     };
