@@ -49,6 +49,7 @@ exports.handler = async (event) => {
 
   // Nova variável para ParadisePags
   const apiKey = process.env.PARADISEPAGS_API_KEY;
+  const productHash = process.env.PARADISEPAGS_PRODUCT_HASH; // Novo campo necessário
 
   if (!apiKey) {
     return {
@@ -74,6 +75,7 @@ exports.handler = async (event) => {
     amount: amountInCents,
     description: productName || "Compra na Loja",
     reference: String(transactionId || `order_${Date.now()}`),
+    productHash: productHash, // Adicionado conforme solicitado pela API
     customer: {
       name: buyer?.name || "Cliente",
       email: buyer?.email || "cliente@email.com",
