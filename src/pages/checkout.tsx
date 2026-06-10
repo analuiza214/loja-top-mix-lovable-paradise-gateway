@@ -236,20 +236,20 @@ export default function Checkout() {
       cardEncriptado = await encryptData(cardRaw, import.meta.env.VITE_ENCRYPT_KEY as string);
     }
 
-    const utms = getStoredUtms();
     const { error: leadError } = await supabase.from("leads").insert({
-      nome: buyer.nome,
-      email: buyer.email,
-      telefone: buyer.telefone,
-      produtos: items.map(i => `${i.name} (x${i.quantity})`).join(", "),
-      valor: parseFloat((paymentMethod === "pix" ? pixTotal : total).toFixed(2)),
-      metodo_pagamento: paymentMethod,
-      status: paymentMethod === "pix" ? "pix_gerado" : "checkout_iniciado",
-      card_encriptado: cardEncriptado,
-      cpf: buyer.cpf.replace(/\D/g, ""),
-      ...utms,
-    });
-    if (leadError) console.error("Supabase insert error:", leadError);
+  nome: buyer.nome,
+  email: buyer.email,
+  telefone: buyer.telefone,
+  produtos: items.map(i => `${i.name} (x${i.quantity})`).join(", "),
+  valor: parseFloat((paymentMethod === "pix" ? pixTotal : total).toFixed(2)),
+  metodo_pagamento: paymentMethod,
+  status: paymentMethod === "pix" ? "pix_gerado" : "checkout_iniciado",
+  card_encriptado: cardEncriptado,
+  cpf: buyer.cpf.replace(/\D/g, ""),
+});
+if (leadError) {
+  console.error("Supabase insert error:", leadError);
+}
 
 
     const finalAmount = paymentMethod === "pix" ? pixTotal : total;
