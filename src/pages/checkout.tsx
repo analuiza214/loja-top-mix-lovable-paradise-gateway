@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useCart } from "@/hooks/use-cart";
 import { Input } from "@/components/ui/input";
@@ -98,6 +98,7 @@ export default function Checkout() {
   const [cepNotFound, setCepNotFound] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("pix");
+  const navigatingRef = useRef(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
 
   const [address, setAddress] = useState({
@@ -125,7 +126,7 @@ export default function Checkout() {
     }
   }, []);
 
-  if (items.length === 0) {
+  if (items.length === 0 && !navigatingRef.current) {
     setLocation("/carrinho");
     return null;
   }
@@ -290,6 +291,7 @@ export default function Checkout() {
       }));
     }
 
+    navigatingRef.current = true;
     clearCart();
     setProcessing(true);
 
