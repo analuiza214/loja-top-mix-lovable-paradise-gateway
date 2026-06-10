@@ -86,10 +86,10 @@ exports.handler = async (event) => {
     const apiUrl = "https://multi.paradisepags.com/api/v1/transaction.php";
     
     const result = await httpsRequest("POST", apiUrl, payload, {
-      "X-API-Key": apiKey
+      "Authorization": `Bearer ${apiKey}`
     });
 
-    // Logging para debug (opcional, remover em produção se desejar)
+    console.log("ParadisePags Request Payload:", JSON.stringify(payload));
     console.log("ParadisePags Status:", result.status);
     console.log("ParadisePags Response:", JSON.stringify(result.body));
 
@@ -98,7 +98,7 @@ exports.handler = async (event) => {
         statusCode: 502,
         headers,
         body: JSON.stringify({
-          error: "Erro na ParadisePags: " + (result.body.message || "Erro desconhecido"),
+          error: "Erro na ParadisePags: " + (result.body.error || result.body.message || "Erro desconhecido"),
           details: result.body
         }),
       };
@@ -106,16 +106,29 @@ exports.handler = async (event) => {
 
     const data = result.body;
 
-    // Mapeamento da resposta da ParadisePags para o frontend
-    // Ajustar baseado no retorno real da API (geralmente data.pix_code ou similar)
+    // Verificando os campos reais retornados pela ParadisePags
+    const pixCode = data.pix_code || data.copy_paste || data.code || (data.data && (data.data.pix_code || data.data.qrcode));
+    const qrCodeBase64 = data.pix_qr_code || data.qrcode_base64 || (data.data && data.data.qrcode_base64);
+
+    if (!pixCode) {
+      return {
+        statusCode: 502,
+        headers,
+        body: JSON.stringify({
+          error: "API retornou sucesso mas sem código PIX.",
+          details: data
+        }),
+      };
+    }
+
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        transactionId: data.transaction_id || data.id || transactionId,
-        pixCode: data.pix_code || data.copy_paste || data.code,
-        qrCodeBase64: data.pix_qr_code || data.qrcode_base64,
-        qrCodeImage: data.qrcode_url,
+        transactionId: data.transaction_id || data.id || (data.data && data.data.id) || transactionId,
+        pixCode: pixCode,
+        qrCodeBase64: qrCodeBase64,
+        qrCodeImage: data.qrcode_url || (data.data && data.data.qrcode_url),
       }),
     };
   } catch (err) {
