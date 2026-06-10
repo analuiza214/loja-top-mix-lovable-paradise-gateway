@@ -1,5 +1,6 @@
 const https = require("https");
-const QRCode = require("qrcode");
+// Removido qrcode por incompatibilidade direta com Netlify Functions sem build step manual
+// Nota: Certifique-se de que 'qrcode' não esteja sendo referenciado em nenhum lugar deste arquivo.
 
 function httpsRequest(method, url, data, headers) {
   return new Promise((resolve, reject) => {
@@ -159,15 +160,8 @@ exports.handler = async (event) => {
     const pixCode = findPix(data);
     const externalId = data.hash || data.transaction_id || (data.data && (data.data.hash || data.data.id));
 
-    // Gerar QR Code oficial a partir do pixCode se a API não retornou um válido
+    // Enviar o pixCode para que o frontend gere o QR Code usando a biblioteca local
     let finalQrCodeBase64 = data.qrcode_base64 || (data.data && data.data.qrcode_base64);
-    if (!finalQrCodeBase64 && pixCode) {
-      try {
-        finalQrCodeBase64 = await QRCode.toDataURL(pixCode);
-      } catch (qrErr) {
-        console.error("Erro ao gerar QR Code:", qrErr);
-      }
-    }
 
     return {
       statusCode: 200,

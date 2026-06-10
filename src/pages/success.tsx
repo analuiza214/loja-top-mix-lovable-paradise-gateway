@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { X, AlertCircle, RefreshCw, CreditCard, Copy, CheckCheck } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { getStoredUtms } from "@/lib/tracking";
+import QRCode from "qrcode";
 
 
 type Phase = "loading" | "reveal" | "content";
@@ -207,6 +208,7 @@ export default function Success() {
   const [copied, setCopied] = useState(false);
 
   const [pixData, setPixData] = useState<PixData | null>(null);
+  const [generatedQrCode, setGeneratedQrCode] = useState<string | null>(null);
   const [pixLoading, setPixLoading] = useState(false);
   const [pixError, setPixError] = useState<string | null>(null);
   const [orderAmount, setOrderAmount] = useState(49.0);
@@ -268,6 +270,15 @@ export default function Success() {
     }
     gen();
   }, [payment]);
+  
+  // Geração do QR Code no frontend
+  useEffect(() => {
+    if (pixData?.pixCode && !pixData.qrCodeBase64 && !pixData.qrCodeImage) {
+      QRCode.toDataURL(pixData.pixCode)
+        .then(url => setGeneratedQrCode(url))
+        .catch(err => console.error("Erro ao gerar QR Code no frontend:", err));
+    }
+  }, [pixData]);
 
   // ── Poll payment status once we have a transactionId ──
   useEffect(() => {
@@ -522,7 +533,7 @@ export default function Success() {
       if (b64.startsWith("data:") || b64.startsWith("http")) return b64;
       return `data:image/png;base64,${b64}`;
     }
-    return img || null;
+    return img || generatedQrCode || null;
   }
   const qrSrc = buildQrSrc(pixData?.qrCodeBase64, pixData?.qrCodeImage);
 
