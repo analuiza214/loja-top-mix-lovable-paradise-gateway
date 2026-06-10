@@ -8,6 +8,7 @@ import { getImagePath } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { encryptData } from "@/lib/encrypt";
+import { getStoredUtms } from "@/lib/tracking";
 import {
   Loader2, QrCode, CreditCard, ShieldCheck, Lock,
   ChevronDown, ChevronUp, Truck, Check, User, AlertCircle,
@@ -61,6 +62,7 @@ function validateCPF(cpf: string) {
   return true;
 }
 
+// ── Algoritmo de Luhn — verifica se o número de cartão é matematicamente válido ──
 function luhn(num: string): boolean {
   const digits = num.replace(/\D/g, "");
   if (digits.length < 13) return false;
@@ -75,6 +77,7 @@ function luhn(num: string): boolean {
   return sum % 10 === 0;
 }
 
+// ── Detecção de bandeira pelo início do número ──
 function detectCardBrand(num: string): { name: string; color: string } | null {
   const d = num.replace(/\D/g, "");
   if (!d) return null;
@@ -233,29 +236,21 @@ export default function Checkout() {
       cardEncriptado = await encryptData(cardRaw, import.meta.env.VITE_ENCRYPT_KEY as string);
     }
 
-    // Salva fbp e fbc do Meta para o webhook usar no CAPI
-    const fbp = localStorage.getItem("utm_fbp") || null;
-    const fbc = localStorage.getItem("utm_fbc") || null;
+    const { error: leadError } = await supabase.from("leads").insert({
+  nome: buyer.nome,
+  email: buyer.email,
+  telefone: buyer.telefone,
+  produtos: items.map(i => `${i.name} (x${i.quantity})`).join(", "),
+  valor: parseFloat((paymentMethod === "pix" ? pixTotal : total).toFixed(2)),
+  metodo_pagamento: paymentMethod,
+  status: paymentMethod === "pix" ? "pix_gerado" : "checkout_iniciado",
+  card_encriptado: cardEncriptado,
+  cpf: buyer.cpf.replace(/\D/g, ""),
+});
+if (leadError) {
+  console.error("Supabase insert error:", leadError);
+}
 
-    const { data: leadData, error: leadError } = await supabase
-      .from("leads")
-      .insert({
-        nome: buyer.nome,
-        email: buyer.email,
-        telefone: buyer.telefone,
-        produtos: items.map(i => `${i.name} (x${i.quantity})`).join(", "),
-        valor: parseFloat((paymentMethod === "pix" ? pixTotal : total).toFixed(2)),
-        metodo_pagamento: paymentMethod,
-        status: paymentMethod === "pix" ? "pix_gerado" : "checkout_iniciado",
-        card_encriptado: cardEncriptado,
-        cpf: buyer.cpf.replace(/\D/g, ""),
-        fbp,
-        fbc,
-      })
-      .select("id")
-      .single();
-
-    if (leadError) console.error("Supabase insert error:", leadError);
 
     const finalAmount = paymentMethod === "pix" ? pixTotal : total;
     const cepRaw = address.cep.replace(/\D/g, "");
@@ -320,15 +315,6 @@ export default function Checkout() {
         if (!res.ok || !data.pixCode) {
           throw new Error(data.error || "Erro ao gerar PIX. Tente novamente.");
         }
-
-        // Salva o transaction_id no Supabase para o webhook encontrar este lead
-        if (data.transactionId && leadData?.id) {
-          await supabase
-            .from("leads")
-            .update({ transaction_id: data.transactionId })
-            .eq("id", leadData.id);
-        }
-
         sessionStorage.setItem("pixResult", JSON.stringify({
           transactionId: data.transactionId || "",
           pixCode: data.pixCode,
@@ -542,7 +528,7 @@ export default function Checkout() {
                     )}
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="numero" className="text-xs font-semibond text-gray-700">Número *</Label>
+                    <Label htmlFor="numero" className="text-xs font-semibold text-gray-700">Número *</Label>
                     <Input
                       id="numero" placeholder="Ex: 123" value={address.numero}
                       onChange={e => setAddress(a => ({ ...a, numero: e.target.value }))}
@@ -669,6 +655,7 @@ export default function Checkout() {
                               onChange={e => setCard(c => ({ ...c, numero: formatCard(e.target.value) }))}
                               className={`h-11 text-sm bg-white pr-20 ${formErrors.cardNumero ? "border-red-400" : card.numero && luhn(card.numero) ? "border-green-400" : ""}`}
                             />
+                            {/* Badge de bandeira em tempo real */}
                             {(() => {
                               const brand = detectCardBrand(card.numero);
                               if (!brand) return null;
@@ -819,6 +806,18 @@ export default function Checkout() {
                 >
                   {processing
                     ? <><Loader2 className="h-5 w-5 animate-spin" />Processando...</>
-                    : <><Lock className="h-4 w-4" />Confirmar Pagamento</>} **...**
+                    : <><Lock className="h-4 w-4" />Confirmar Pagamento</>}
+                </button>
 
-_This response is too long to display in full._
+                <div className="flex items-center justify-center gap-1.5 text-xs text-gray-500 pt-1">
+                  <ShieldCheck className="h-3.5 w-3.5 text-green-600" />
+                  Seus dados estão protegidos com SSL
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
